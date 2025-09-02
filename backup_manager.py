@@ -67,6 +67,10 @@ class BackupManager:
                 dest_file = self.destination_path / relative_path
                 
                 try:
+                    # Skip symbolic links when calculating size
+                    if source_file.is_symlink():
+                        continue
+                    
                     should_copy = False
                     
                     if not dest_file.exists():
@@ -83,8 +87,8 @@ class BackupManager:
                         total_size += source_file.stat().st_size
                         file_count += 1
                         
-                except (OSError, FileNotFoundError):
-                    self.logger.warning(f"Could not stat file: {source_file}")
+                except (OSError, FileNotFoundError, PermissionError) as e:
+                    self.logger.debug(f"Could not stat file: {source_file} - {e}")
         
         return total_size, file_count
     
@@ -103,6 +107,8 @@ class BackupManager:
             
             copied_files = 0
             copied_size = 0
+            skipped_symlinks = 0
+            permission_errors = 0
             
             for root, dirs, files in os.walk(self.source_path):
                 for file in files:
@@ -113,6 +119,12 @@ class BackupManager:
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     
                     try:
+                        # Skip symbolic links
+                        if source_file.is_symlink():
+                            skipped_symlinks += 1
+                            self.logger.debug(f"Skipping symbolic link: {source_file}")
+                            continue
+                        
                         should_copy = False
                         
                         if not dest_file.exists():
@@ -142,11 +154,29 @@ class BackupManager:
                             if copied_files % 1000 == 0:  # Show skipped progress too
                                 self.logger.info(f"Skipped {copied_files} duplicate files so far")
                     
+                    except PermissionError as e:
+                        permission_errors += 1
+                        self.logger.warning(f"Permission denied for {source_file}: {e}")
+                    except FileNotFoundError as e:
+                        # This typically happens with broken symbolic links
+                        skipped_symlinks += 1
+                        self.logger.debug(f"File not found (likely broken symlink): {source_file}")
+                    except OSError as e:
+                        if e.errno == 22:  # Invalid argument - typically a symlink issue
+                            skipped_symlinks += 1
+                            self.logger.debug(f"Invalid file (likely symlink): {source_file}")
+                        else:
+                            self.logger.error(f"OS error copying {source_file}: {e}")
                     except Exception as e:
                         self.logger.error(f"Failed to copy {source_file}: {e}")
             
             self.logger.info(f"Backup completed: {copied_files} files copied "
                            f"({copied_size / (1024**3):.2f}GB)")
+            
+            if skipped_symlinks > 0:
+                self.logger.info(f"Skipped {skipped_symlinks} symbolic links")
+            if permission_errors > 0:
+                self.logger.warning(f"Encountered {permission_errors} permission errors")
             
         except Exception as e:
             self.logger.error(f"Backup failed: {e}")

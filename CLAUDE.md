@@ -48,6 +48,16 @@ ps aux | grep backup_manager
 tail -f nohup.out
 ```
 
+**Find large files needing backup:**
+```bash
+python3 find_large_files.py '/Volumes/SourceDrive' '/Volumes/DestinationDrive'
+```
+
+**Stop background scheduler:**
+```bash
+kill $(ps aux | grep 'backup_manager.py' | grep -v grep | awk '{print $2}')
+```
+
 ## Key Implementation Details
 
 - **Incremental Logic**: Files are copied only if they don't exist at destination OR if source file has newer modification time OR different file size
@@ -55,11 +65,39 @@ tail -f nohup.out
 - **Progress Tracking**: Reports progress every 100 copied files, with special logging for large files
 - **Error Handling**: Continues backup on individual file failures, logging errors without stopping the entire process
 - **macOS Compatibility**: Uses `statvfs.f_bavail` instead of `f_available` for disk space calculation on macOS
+- **Symbolic Link Handling**: Automatically detects and skips symbolic links (common in Python venv directories) to prevent copy failures
+- **Permission Error Handling**: Gracefully handles permission-denied errors with warnings, allowing backup to continue
 
 ## External Drive Path Handling
 
 Drive paths must be quoted when containing spaces. Typical macOS external drive paths are `/Volumes/Drive Name`. The system validates both read access to source and write access to destination before starting.
 
+## Project Files
+
+- `backup_manager.py`: Main backup script with BackupManager class (backup_manager.py:17)
+- `find_large_files.py`: Utility to identify and analyze large files needing backup
+- `requirements.txt`: Python dependencies (currently just `schedule==1.2.0`)
+- `readme.txt`: User documentation with example commands
+
 ## Logging
 
 Automatic daily log files are created with format `backup_YYYYMMDD.log`. When using background scheduling with `nohup`, output is redirected to `nohup.out`.
+
+The backup process now provides enhanced reporting:
+- Summary of files copied with total size
+- Count of skipped symbolic links (if any)
+- Count of permission errors encountered (if any)
+
+## Testing Backup Without Copying
+
+To verify what would be backed up without actually copying files, use the `find_large_files.py` utility which performs the same checks as the main backup but only reports what would be copied.
+
+## Common Issues and Solutions
+
+**Symbolic Link Errors in Python Virtual Environments**
+- The backup manager automatically skips symbolic links, preventing errors with `venv/bin/python` files
+- These are safely ignored as they're recreated when virtual environments are rebuilt
+
+**Permission Denied Errors**
+- Files with restricted permissions are logged as warnings but don't stop the backup
+- Review permission error count in the summary to identify protected files
